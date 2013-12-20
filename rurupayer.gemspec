@@ -6,10 +6,10 @@ require 'rurupayer/version'
 Gem::Specification.new do |spec|
   spec.name          = "rurupayer"
   spec.version       = Rurupayer::VERSION
-  spec.authors       = ["roman"]
-  spec.email         = ["buzhenko@unitmedia.ru"]
-  spec.description   = %q{TODO: Write a gem description}
-  spec.summary       = %q{TODO: Write a gem summary}
+  spec.authors       = ["Rossmari"]
+  spec.email         = ["roman-bujenko@yandex.ru"]
+  spec.description   = %q{Gem for electronic payments through RuRu pay service}
+  spec.summary       = %q{Summary}
   spec.homepage      = ""
   spec.license       = "MIT"
 
