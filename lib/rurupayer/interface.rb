@@ -3,19 +3,15 @@ require 'net/http'
 require 'net/https'
 require 'open-uri'
 require 'rexml/document'
-require 'digest/sha1'
+require 'digest/hmac'
+require 'base64'
 
 class Rurupayer::Interface
   include ActionDispatch::Routing::UrlFor
   include Rails.application.routes.url_helpers
 
-  cattr_accessor :config
-
   @@default_options = {
       :language => "ru",
-      :success_path => "#{@options[:root_url]}/rurupayer/success",
-      :notify_path => "#{@options[:root_url]}/rurupayer/notify",
-      :fail_path => "#{@options[:root_url]}/rurupayer/notify"
   }
   @cache = {}
 
@@ -29,6 +25,9 @@ class Rurupayer::Interface
 
   def initialize(options)
     @options = @@default_options.merge(options.symbolize_keys)
+    #@options[:success_path] = "#{@options[:root_url]}/rurupayer/success"
+    #@options[:notify_path] = "#{@options[:root_url]}/rurupayer/notify"
+    #@options[:fail_path] = "#{@options[:root_url]}/rurupayer/notify"
     @cache   = {}
   end
 
@@ -49,34 +48,34 @@ class Rurupayer::Interface
     fail_implementation({}, controller)
   end
 
+  def self.callback(params, controller)
+    callback_implementation({}, controller)
+  end
+
   # создание урла для оплаты
   def init_payment_url(invoice_id, amount, custom_options={})
     url_options = init_payment_options(invoice_id, amount, custom_options)
-    "#{base_url}?" + url_options.to_param
+    "#{base_url}?" + url_options
   end
 
-  def init_payment_options(invoice_id, amount, description, custom_options = {})
+  def init_payment_options(invoice_id, amount, custom_options = {})
     options = {
-        :partner_id       => @options[:partner_id],
-        :service_id       => @options[:service_id],
+        # or order id - идентификтор заказа
+        :order_id     => invoice_id,
+        :amount       => amount.to_s,
 
-        :amount      => amount.to_s,
-        :invoice_id  => invoice_id, # or order id - идентификтор заказа
+        :partner_id   => @options[:partner_id],
+        :service_id   => @options[:service_id],
 
-        :success_url       => on_success_url,
-        :failure_url       => on_fail_url,
+        #:success_url  => @options[:success_path],
+        #:failure_url  => @options[:fail_path],
 
-        #:description => description[0, 100],
-        :signature   => init_payment_signature(invoice_id, amount, custom_options)
-        #:currency    => currency,
-        #:email       => email,
-        #:language    => language
 
-    }.merge(Hash[custom_options.sort.map{|x| ["shp#{x[0]}", x[1]]}])
+    }.merge(Hash[custom_options.map{|x| ["shp#{x[0]}", x[1]]}])
 
-    #map_params(options, @@params_map)
+    options[:signature] = init_payment_signature(options)
 
-    options.to_param
+    query_string(options)
   end
 
   def parse_response_params(params)
@@ -87,22 +86,19 @@ class Rurupayer::Interface
     end
   end
 
-  def init_payment_signature(invoice_id, amount, custom_options={})
-    Base64.encode64(init_payment_signature_string(invoice_id, amount, custom_options))
+  def init_payment_signature(options)
+    Base64.encode64(init_payment_signature_string(options)).gsub('\n','')
   end
 
 
-  def init_payment_signature_string(invoice_id, amount, custom_options={})
-    custom_params_string = custom_options.sort.map{|x| "#{x[0]}=#{x[1]}"}.join('')
-    params_string =  "#{invoice_id}#{amount}" + "#{@options[:partner_id]}#{@options[:service_id]}#{@options[:success_url]}#{@options[:failure_url]}"
-
-    encoded_partner_key = Base64::decode64(@options[:partner_key])
-    Digest::SHA1.hexdigest(encoded_partner_key + params_string + custom_params_string)
+  def init_payment_signature_string(options)
+    params_string = params_string(options)
+    encoded_partner_key = Base64::decode64(@options[:source_key])
+    OpenSSL::HMAC.hexdigest('SHA1',encoded_partner_key, params_string)
   end
 
-  # returns http://test.robokassa.ru or https://merchant.roboxchange.com in order to current mode
   def base_url
-    test_mode? ? 'http://widget.test.ru' : 'https://widget.ru/partner'
+    test_mode? ? 'https://wdemo.ruru.ru/partner' : 'https://widget.ruru.ru/partner'
   end
 
   def map_params(params, map) #:nodoc:
@@ -223,26 +219,6 @@ class Rurupayer::Interface
   #  end]
   #end
 
-  # for testing
-  # === Example
-  # i.default_url_options = { :host => '127.0.0.1', :port => 3000 }
-  ## i.notification_url # => 'http://127.0.0.1:3000/robokassa/asfadsf/notify'
-  #def notification_url
-  #  rurupayer_notification_url :notification_key => @options[:notification_key]
-  #end
-
-  ## for testing
-  #def on_success_url
-  #  rurupayer_on_success_url
-  #end
-  #
-  ## for testing
-  #def on_fail_url
-  #  rurupayer_on_fail_url
-  #end
-
-
-
   #def rates_url(amount, currency)
   #  "#{xml_services_base_url}/GetRates?#{query_string(rates_options(amount, currency))}"
   #end
@@ -269,7 +245,6 @@ class Rurupayer::Interface
 
   # make hash of options for init_payment_url
 
-
   # calculates signature to check params from Robokassa
   #def response_signature(parsed_params)
   #  md5 response_signature_string(parsed_params)
@@ -280,9 +255,6 @@ class Rurupayer::Interface
   #  custom_options_fmt = custom_options.sort.map{|x|"shp#{x[0]}=x[1]]"}.join(":")
   #  "#{parsed_params[:amount]}:#{parsed_params[:invoice_id]}:#{@options[:password2]}#{unless custom_options_fmt.blank? then ":" + custom_options_fmt else "" end}"
   #end
-
-
-
 
   # returns base url for API access
   #def xml_services_base_url
@@ -329,15 +301,17 @@ class Rurupayer::Interface
   #    Hash[params.map do|key, value| [(map[key] || map[key.to_sym] || key), value] end]
   #  end
   #
-
-
-
   #
-  #  def query_string(params) #:nodoc:
-  #    params.map do |name, value|
-  #      "#{CGI::escape(name.to_s)}=#{CGI::escape(value.to_s)}"
-  #    end.join("&")
-  #  end
+    def query_string(params) #:nodoc:
+      params.map do |name, value|
+        "#{CGI::escape(name.to_s)}=#{CGI::escape(value.to_s)}"
+      end.join("&")
+    end
+
+    def params_string(options)
+      options.map{|x| x[1]}.join()
+    end
+
   #
   #  # make request and parse XML from specified url
   #  def get_remote_xml(url)
@@ -358,7 +332,7 @@ class Rurupayer::Interface
       self.new get_options_by_notification_key(key)
     end
 
-    %w{success fail notify}.map{|m| m + '_implementation'} + ['get_options_by_notification_key'].each do |m|
+    %w{success fail notify callback}.map{|m| m + '_implementation'} + ['get_options_by_notification_key'].each do |m|
       define_method m.to_sym do |*args|
         raise NoMethodError, "RuruPay::Interface.#{m} should be defined by app developer"
       end

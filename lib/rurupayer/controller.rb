@@ -17,4 +17,10 @@ class Rurupayer::Controller < ActionController::Base
     retval = Rurupayer.interface_class.fail(params, self)
     redirect_to retval if retval.is_a? String
   end
+
+  def callback
+    retval = Rurupayer.interface_class.callback(params, self)
+    redirect_to retval if retval.is_a? String
+  end
+
 end

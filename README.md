@@ -1,6 +1,7 @@
 # Rurupayer
 
-TODO: Write a gem description
+First try of copy/edit some gem. Failed fork strategy.
+Gem for working with russian payment system RuRu. Based on https://github.com/shaggyone/robokassa
 
 ## Installation
 
@@ -18,7 +19,8 @@ Or install it yourself as:
 
 ## Usage
 
-TODO: Write usage instructions here
+Can read usage here https://github.com/shaggyone/robokassa
+Original robokassa gem may be changed easily with custom Interface class.
 
 ## Contributing
 
