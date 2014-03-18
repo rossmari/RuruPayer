@@ -2,12 +2,6 @@ class Rurupayer::Controller < ActionController::Base
 
   protect_from_forgery :only => []
 
-  def notify
-    interface = Rurupayer.interface_class.create_by_notification_key params[:notification_key]
-    params.delete :notification_key
-    render :text => interface.notify(params, self)
-  end
-
   def success
     retval = Rurupayer.interface_class.success(params, self)
     redirect_to retval if retval.is_a? String
@@ -20,7 +14,15 @@ class Rurupayer::Controller < ActionController::Base
 
   def callback
     retval = Rurupayer.interface_class.callback(params, self)
-    redirect_to retval if retval.is_a? String
+
+    builder = Nokogiri::XML::Builder.new { |xml|
+          xml.ServiceResponse('xmlns' => 'http://ruru.service.provider', 'xmlns:i' => 'http://www.w3.org/2001/XMLSchema-instance') do
+            xml<<retval.to_xml( :skip_types => true, :skip_instruct => true).gsub(/<\/{0,1}hash>\s+/, "")
+          end
+    }
+    puts builder.to_xml
+
+    render :xml => builder.to_xml
   end
 
 end

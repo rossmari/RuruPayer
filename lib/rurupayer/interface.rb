@@ -25,31 +25,31 @@ class Rurupayer::Interface
 
   def initialize(options)
     @options = @@default_options.merge(options.symbolize_keys)
-    #@options[:success_path] = "#{@options[:root_url]}/rurupayer/success"
-    #@options[:notify_path] = "#{@options[:root_url]}/rurupayer/notify"
-    #@options[:fail_path] = "#{@options[:root_url]}/rurupayer/notify"
+    @options[:success_path] = "#{@options[:root_url]}/rurupayer/success"
+    @options[:fail_path] = "#{@options[:root_url]}/rurupayer/fail"
     @cache   = {}
-  end
-
-  def notify(params, controller)
-    #make params map
-    notify_implementation({},  controller)
-    #ansver xml
   end
 
   def self.success(params, controller)
     #make params map
-    success_implementation({}, controller)
+    success_implementation(params, controller)
     #ansver xml
   end
 
+
   def self.fail(params, controller)
     #make params map
-    fail_implementation({}, controller)
+    fail_implementation(params , controller)
   end
 
   def self.callback(params, controller)
-    callback_implementation({}, controller)
+    params[:action] = /\?action=(\S+?)&/.match(controller.request.fullpath)[1]
+
+    if check_response_signature(params)
+      success_callback_implementation(params)
+    else
+      fail_callback_implementation(params)
+    end
   end
 
   # создание урла для оплаты
@@ -67,34 +67,41 @@ class Rurupayer::Interface
         :partner_id   => @options[:partner_id],
         :service_id   => @options[:service_id],
 
-        #:success_url  => @options[:success_path],
-        #:failure_url  => @options[:fail_path],
-
-
-    }.merge(Hash[custom_options.map{|x| ["shp#{x[0]}", x[1]]}])
+        :success_url  => @options[:success_path],
+        :failure_url  => @options[:fail_path],
+    }
 
     options[:signature] = init_payment_signature(options)
 
     query_string(options)
   end
 
-  def parse_response_params(params)
-    parsed_params = map_params(params, @@notification_params_map)
-    parsed_params[:custom_options] = Hash[args.select do |k,v| o.starts_with?('shp') end.sort.map do|k, v| [k[3, k.size], v] end]
-    if response_signature(parsed_params)!=parsed_params[:signature].downcase
-      raise "Invalid signature"
-    end
+  def self.check_response_signature(params)
+    #remove controller name and signature from params set
+    # prepare params
+    params.delete(:controller)
+    signature = params.delete(:signature)
+    signature == create_signature(params)
   end
+
+  # static for Signature
+  def self.create_signature(params)
+    params_string = params.map{|p| p[1]}.join()
+    puts "S #{params_string} E"
+    encoded_partner_key = Base64::decode64(get_options_by_notification_key('')[:source_key])
+    sha_digest = OpenSSL::HMAC.digest('SHA1',encoded_partner_key, params_string)
+    Base64.encode64(sha_digest).gsub("\n",'')
+  end
+
 
   def init_payment_signature(options)
-    Base64.encode64(init_payment_signature_string(options)).gsub('\n','')
+    Base64.encode64(init_payment_signature_string(options)).gsub("\n",'')
   end
-
 
   def init_payment_signature_string(options)
     params_string = params_string(options)
     encoded_partner_key = Base64::decode64(@options[:source_key])
-    OpenSSL::HMAC.hexdigest('SHA1',encoded_partner_key, params_string)
+    OpenSSL::HMAC.digest('SHA1',encoded_partner_key, params_string)
   end
 
   def base_url
@@ -105,234 +112,45 @@ class Rurupayer::Interface
     self.class.map_params params, map
   end
 
-  #def payment_methods # :nodoc:
-  #  return @cache[:payment_methods] if @cache[:payment_methods]
-  #  xml = get_remote_xml(payment_methods_url)
-  #  if xml.elements['PaymentMethodsList/Result/Code'].text != '0'
-  #    raise (a=xml.elements['PaymentMethodsList/Result/Description']) ? a.text : "Unknown error"
-  #  end
-  #
-  #  @cache[:payment_methods] ||= Hash[xml.elements.each('PaymentMethodsList/Methods/Method'){}.map do|g|
-  #    [g.attributes['Code'], g.attributes['Description']]
-  #  end]
-  #end
-  #
-  #def rates_long(amount, currency='')
-  #  cache_key = "rates_long_#{currency}_#{amount}"
-  #  return @cache[cache_key] if @cache[cache_key]
-  #  xml = get_remote_xml(rates_url(amount, currency))
-  #  if xml.elements['RatesList/Result/Code'].text != '0'
-  #    raise (a=xml.elements['RatesList/Result/Description']) ? a.text : "Unknown error"
-  #  end
-  #
-  #  @cache[cache_key] = Hash[xml.elements.each('RatesList/Groups/Group'){}.map do|g|
-  #    code = g.attributes['Code']
-  #    description = g.attributes['Description']
-  #    [
-  #        code,
-  #        {
-  #            :code        => code,
-  #            :description => description,
-  #            :currencies  => Hash[g.elements.each('Items/Currency'){}.map do|c|
-  #              label = c.attributes['Label']
-  #              name  = c.attributes['Name']
-  #              [label, {
-  #                  :currency             => label,
-  #                  :currency_description => name,
-  #                  :group                => code,
-  #                  :group_description    => description,
-  #                  :amount => BigDecimal.new(c.elements['Rate'].attributes['IncSum'])
-  #              }]
-  #            end]
-  #        }
-  #    ]
-  #  end]
-  #end
+  def query_string(params) #:nodoc:
+    params.map do |name, value|
+      "#{CGI::escape(name.to_s)}=#{CGI::escape(value.to_s)}"
+    end.join("&")
+  end
 
-  #def rates(amount, currency='')
-  #  cache_key = "rates_#{currency}_#{amount}"
-  #  @cache[cache_key] ||= Hash[rates_long(amount, currency).map do |key, value|
-  #    [key, {
-  #        :description => value[:description],
-  #        :currencies => Hash[(value[:currencies] || []).map do |k, v|
-  #          [k, v]
-  #        end]
-  #    }]
-  #  end]
-  #end
+  def params_string(options)
+    options.map{|x| x[1]}.join()
+  end
 
-  #def rates_linear(amount, currency='')
-  #  cache_key = "rates_linear#{currency}_#{amount}"
-  #  @cache[cache_key] ||= begin
-  #    retval = rates(amount, currency).map do |group|
-  #      group_name, group = group
-  #      group[:currencies].map do |currency|
-  #        currency_name, currency = currency
-  #        {
-  #            :name       => currency_name,
-  #            :desc       => currency[:currency_description],
-  #            :group_name => group[:name],
-  #            :group_desc => group[:description],
-  #            :amount     => currency[:amount]
-  #        }
-  #      end
-  #    end
-  #    Hash[retval.flatten.map { |v| [v[:name], v] }]
-  #  end
-  #end
+  def self.generate_response(params, error_code, error_desc)
+    response_body =
+        {
+            :Amount => params[:amount],
+            :Date => params[:date],
+            :ExternalId => params[:externalId],
+            :Info => '',
+            :Id => params[:id]
+        }
 
-  #def currencies_long
-  #  return @cache[:currencies_long] if @cache[:currencies_long]
-  #  xml = get_remote_xml(currencies_url)
-  #  if xml.elements['CurrenciesList/Result/Code'].text != '0'
-  #    raise (a=xml.elements['CurrenciesList/Result/Description']) ? a.text : "Unknown error"
-  #  end
-  #  @cache[:currencies_long] = Hash[xml.elements.each('CurrenciesList/Groups/Group'){}.map do|g|
-  #    code = g.attributes['Code']
-  #    description = g.attributes['Description']
-  #    [
-  #        code,
-  #        {
-  #            :code        => code,
-  #            :description => description,
-  #            :currencies  => Hash[g.elements.each('Items/Currency'){}.map do|c|
-  #              label = c.attributes['Label']
-  #              name  = c.attributes['Name']
-  #              [label, {
-  #                  :currency             => label,
-  #                  :currency_description => name,
-  #                  :group                => code,
-  #                  :group_description    => description
-  #              }]
-  #            end]
-  #        }
-  #    ]
-  #  end]
-  #end
-  #
-  #def currencies
-  #  @cache[:currencies] ||= Hash[currencies_long.map do |key, value|
-  #    [key, {
-  #        :description => value[:description],
-  #        :currencies => value[:currencies]
-  #    }]
-  #  end]
-  #end
-
-  #def rates_url(amount, currency)
-  #  "#{xml_services_base_url}/GetRates?#{query_string(rates_options(amount, currency))}"
-  #end
-  #
-  #def rates_options(amount, currency)
-  #  map_params(subhash(@options.merge(:amount=>amount, :currency=>currency), %w{login language amount currency}), @@service_params_map)
-  #end
-  #
-  #def payment_methods_url
-  #  @cache[:get_currencies_url] ||= "#{xml_services_base_url}/GetPaymentMethods?#{query_string(payment_methods_options)}"
-  #end
-  #
-  #def payment_methods_options
-  #  map_params(subhash(@options, %w{login language}), @@service_params_map)
-  #end
-  #
-  #def currencies_url
-  #  @cache[:get_currencies_url] ||= "#{xml_services_base_url}/GetCurrencies?#{query_string(currencies_options)}"
-  #end
-
-  #def currencies_options
-  #  map_params(subhash(@options, %w{login language}), @@service_params_map)
-  #end
-
-  # make hash of options for init_payment_url
-
-  # calculates signature to check params from Robokassa
-  #def response_signature(parsed_params)
-  #  md5 response_signature_string(parsed_params)
-  #end
-
-  ## build signature string
-  #def response_signature_string(parsed_params)
-  #  custom_options_fmt = custom_options.sort.map{|x|"shp#{x[0]}=x[1]]"}.join(":")
-  #  "#{parsed_params[:amount]}:#{parsed_params[:invoice_id]}:#{@options[:password2]}#{unless custom_options_fmt.blank? then ":" + custom_options_fmt else "" end}"
-  #end
-
-  # returns base url for API access
-  #def xml_services_base_url
-  #  "#{base_url}/WebService/Service.asmx"
-  #end
-
-  #@@notification_params_map = {
-  #    'OutSum'         => :amount,
-  #    'InvId'          => :invoice_id,
-  #    'SignatureValue' => :signature,
-  #    'Culture'        => :language
-  #}
-  #
-  #@@params_map = {
-  #    'MrchLogin'      => :login,
-  #    'OutSum'         => :amount,
-  #    'InvId'          => :invoice_id,
-  #    'Desc'           => :description,
-  #    'Email'          => :email,
-  #    'IncCurrLabel'   => :currency,
-  #    'Culture'        => :language,
-  #    'SignatureValue' => :signature
-  #}.invert
-  #
-  #@@service_params_map = {
-  #    'MerchantLogin'  => :login,
-  #    'Language'       => :language,
-  #    'IncCurrLabel'   => :currency,
-  #    'OutSum'         => :amount
-  #}.invert
-
-  #def md5(str) #:nodoc:
-  #  Digest::MD5.hexdigest(str).downcase
-  #end
-
-  #def subhash(hash, keys) #:nodoc:
-  #  Hash[keys.map do |key|
-  #    [key.to_sym, hash[key.to_sym]]
-  #  end]
-  #end
-
-  #  # Maps gem parameter names, to robokassa names
-  #  def self.map_params(params, map)
-  #    Hash[params.map do|key, value| [(map[key] || map[key.to_sym] || key), value] end]
-  #  end
-  #
-  #
-    def query_string(params) #:nodoc:
-      params.map do |name, value|
-        "#{CGI::escape(name.to_s)}=#{CGI::escape(value.to_s)}"
-      end.join("&")
-    end
-
-    def params_string(options)
-      options.map{|x| x[1]}.join()
-    end
-
-  #
-  #  # make request and parse XML from specified url
-  #  def get_remote_xml(url)
-  ##   xml_data = Net::HTTP.get_response(URI.parse(url)).body
-  #    begin
-  #      xml_data = URI.parse(url).read
-  #      doc = REXML::Document.new(xml_data)
-  #    rescue REXML::ParseException => e
-  #      sleep 1
-  #      get_remote_xml(url)
-  #    end
-  #  end
+    response = {
+        :ErrorCode => error_code,
+        :ErrorDescription => error_desc,
+        :Signature => '',
+    }
+    response[:Signature] = Rurupayer.interface_class.create_signature(response.merge(response_body))
+    response[:WillCallback] = 'false'
+    response[:ResponseBody] = response_body
+    response
+  end
 
   class << self
     # This method creates new instance of Interface for specified key (for multi-account support)
-    # it calls then Robokassa call ResultURL callback
+    # it calls then Rurupayer call ResultURL callback
     def create_by_notification_key(key)
       self.new get_options_by_notification_key(key)
     end
 
-    %w{success fail notify callback}.map{|m| m + '_implementation'} + ['get_options_by_notification_key'].each do |m|
+    %w{success fail success_callback fail_callback}.map{|m| m + '_implementation'} + ['get_options_by_notification_key'].each do |m|
       define_method m.to_sym do |*args|
         raise NoMethodError, "RuruPay::Interface.#{m} should be defined by app developer"
       end
