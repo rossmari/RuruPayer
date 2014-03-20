@@ -11,7 +11,7 @@ class Rurupayer::Interface
   include Rails.application.routes.url_helpers
 
   @@default_options = {
-      :language => "ru",
+      language: 'ru',
   }
   @cache = {}
 
@@ -32,14 +32,13 @@ class Rurupayer::Interface
 
   def self.success(params, controller)
     #make params map
-    success_implementation(params, controller)
+    success_implementation(params[:invoice_id], controller)
     #ansver xml
   end
 
-
   def self.fail(params, controller)
     #make params map
-    fail_implementation(params , controller)
+    fail_implementation(params[:invoice_id] , controller)
   end
 
   def self.callback(params, controller)
@@ -52,6 +51,10 @@ class Rurupayer::Interface
     end
   end
 
+  def construct_absolute_path(path, arg = {})
+    "#{path}?#{query_string(arg)}"
+  end
+
   # создание урла для оплаты
   def init_payment_url(invoice_id, amount, custom_options={})
     url_options = init_payment_options(invoice_id, amount, custom_options)
@@ -60,15 +63,16 @@ class Rurupayer::Interface
 
   def init_payment_options(invoice_id, amount, custom_options = {})
     options = {
+
         # or order id - идентификтор заказа
-        :order_id     => invoice_id,
-        :amount       => amount.to_s,
+        order_id:     invoice_id,
+        amount:       amount.to_s,
 
-        :partner_id   => @options[:partner_id],
-        :service_id   => @options[:service_id],
+        partner_id:   @options[:partner_id],
+        service_id:   @options[:service_id],
 
-        :success_url  => @options[:success_path],
-        :failure_url  => @options[:fail_path],
+        success_url:  construct_absolute_path(@options[:success_path], invoice_id: invoice_id),
+        failure_url:  construct_absolute_path(@options[:fail_path], invoice_id: invoice_id)
     }
 
     options[:signature] = init_payment_signature(options)
@@ -125,17 +129,17 @@ class Rurupayer::Interface
   def self.generate_response(params, error_code, error_desc)
     response_body =
         {
-            :Amount => params[:amount],
-            :Date => params[:date],
-            :ExternalId => params[:externalId],
-            :Info => '',
-            :Id => params[:id]
+            Amount:     params[:amount],
+            Date:       params[:date],
+            ExternalId: params[:externalId],
+            Info:       '',
+            Id:         params[:id]
         }
 
     response = {
-        :ErrorCode => error_code,
-        :ErrorDescription => error_desc,
-        :Signature => '',
+        ErrorCode:          error_code,
+        ErrorDescription:   error_desc,
+        Signature:          '',
     }
     response[:Signature] = Rurupayer.interface_class.create_signature(response.merge(response_body))
     response[:WillCallback] = 'false'
