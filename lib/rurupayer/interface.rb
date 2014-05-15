@@ -147,7 +147,7 @@ class Rurupayer::Interface
     response
   end
 
-  def generate_cancel_init_response(params, error_code, error_desc)
+  def self.generate_cancel_init_response(params, error_code, error_desc)
     response_body =
         {
             Date:       params[:date],
