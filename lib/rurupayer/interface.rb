@@ -126,7 +126,7 @@ class Rurupayer::Interface
     options.map{|x| x[1]}.join()
   end
 
-  def self.generate_response(params, error_code, error_desc)
+  def self.generate_payment_response(params, error_code, error_desc)
     response_body =
         {
             Amount:     params[:amount],
@@ -143,6 +143,24 @@ class Rurupayer::Interface
     }
     response[:Signature] = Rurupayer.interface_class.create_signature(response.merge(response_body))
     response[:WillCallback] = 'false'
+    response[:ResponseBody] = response_body
+    response
+  end
+
+  def generate_cancel_init_response(params, error_code, error_desc)
+    response_body =
+        {
+            Date:       params[:date],
+            ExternalId: params[:externalId],
+            Id:         params[:id]
+        }
+
+    response = {
+        ErrorCode:          error_code,
+        ErrorDescription:   error_desc,
+        Signature:          '',
+    }
+    response[:Signature] = Rurupayer.interface_class.create_signature(response.merge(response_body))
     response[:ResponseBody] = response_body
     response
   end
